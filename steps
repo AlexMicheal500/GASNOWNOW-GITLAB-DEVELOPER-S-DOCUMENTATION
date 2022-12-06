@@ -1,0 +1,135 @@
+DOCUMENTATION OF CLONING, BUILDING, UPDATING AND DEPLOYMENT OF GASNOWNOW WEBSITE
+Pre-requisite.
+The following need to be installed:
+i. git (Using sudo apt install git)
+ii. docker (Using sudo apt install docker.io)
+
+CLONE REPOSITORY AND DATABASE SET-UP
+1. Clone repo from develop branch.
+   git clone https://gitlab.bincom.net:801/gasnownowv2/webapp.git develop
+
+2. Change directory into develop branch using:
+   $ cd develop
+
+3. Change branch remotely and clone.
+   $ git branch -a && git checkout remotes/origin/develop && ls
+
+4. Pull mysql image from dockerhub using:
+   docker pull mysql:8.0.30
+   TAKE NOTE OF MYSQL IMAGE BEEN mysql:8.0.30
+
+5. Create mysql container using:
+   $ docker run --name gasnownowDBCont -p 3306:3306 -e MYSQL_ROOT_PASSWORD=password -d mysql:8.0.30
+   NOTE: i. THE NAME OF YOUR DATABASE CONTAINER IS "gasnownowDBCont"
+
+6. Run docker exec commandb to access docker terminal:
+   $ docker exec -it <DB_Container_ID> bash
+
+7. Connect container to database using the following commands:
+   $ mysql -u root -p
+   Create database using:
+   $ create database <Database_Name> ;
+   NOTE: Any name can be used to represent <Database_Name>
+
+8. Then import SQL file cloned from the gitlab repository to database created in 7. above using:
+   $ docker exec -i gasnownowDBCont mysql -u root -ppassword <Database_Name> < 'gasnownow.sql'
+   NOTE: i. Username = root
+         ii. Password = password
+
+9. We need a way of including all tools, dependencies etc. in order to build an image. This can be done in two steps:
+ i. Building a tar file directly from the cloned files using:
+   $ docker build -t gasnownow .
+   NOTE: Ther command above compresses the cloned files and zips them as a .tar file.
+ ii. Then run the command below to build a docker image:
+   $ docker load --input gasnownow.tar 
+
+10. Check the list of images created using:
+  $ docker images
+NOTE: WHEN YOU RUN THE ABOVE COMMAND, YOUR DOCKER IMAGE SHOULD BE "gasnownow:latest"
+
+CREATE A WEBSITE CONTAINER AND COPYING TXT FILES TO CONTAINER
+11. CREATE A NETWORK
+  Two containers (database container and website container) will be created and they need to interact over a network. In order to create a network, we use:
+  $ docker network create gasnownow-network
+  TAKE NOTE OF THE NAME OF THE NAME OF NETWORK AS "gasnownow-network"
+
+12. CREATE WEBSITE CONTAINER
+    Website Container can be created in two ways: 
+    (i). By creating an export to declare a variable using the steps below:
+       a. Create website container using the command below:
+          $ sudo docker run -d --name gasnownow_web -p 8080:80 --network gasnownow-network -d gasnownow:latest
+       	  TAKE NOTE OF THE NAME OF THE NAME OF WEBSITE CONTAINER AS "gasnownow_web"
+       b. To confirm if website container now gasnownow container has been created, use:
+          $ sudo docker ps
+       c. Usng nano or vi command, open the dev_url.txt file and replace url with your url so that browser can have access to it.
+       d. Copy old_url.txt and dev_url.txt from the host server to gasnownow container using the following command:
+          $ sudo docker cp old_url.txt gasnownow_web:/var/www/html/old_url.txt
+       e. Enter the gasnownow container using:
+          $ docker exec -it gasnownow_web /bin/bash
+          NOTE: GASNOWNOW CONTAINER ID CAN BE FOUND WHEN YOU RUN "docker ps"
+       f. Run "ls" and you will find all wp files needed for gasnownow website to run as a wordpress file and the two txt files copied in 4. above.
+
+                                                                         OR
+
+    (ii). By passing variables
+       This is a quicker method, where environmental variables which will ouput the content of each .txt file will be passed into the command that runs a docker container. To do this we use the command below:
+       $ sudo docker run -d --name gasnownow_web -p 8080:80 -e old_url=$(cat old_url.txt) -e dev_url=http://54.204.167.12:8080 --network gasnownow-network -d  gasnownow:latest
+
+INSTALL WP-CLI
+13.In order to interact with wordpress site directly, install wp-cli in the gasnownow container using the following commands:
+   $ curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+   $ chmod +x wp-cli.phar
+   $ mv wp-cli.phar /usr/local/bin/wp
+
+RUN A SEARCH AND REPLACE USING WP-CLI
+14. The gasnownow.sql file has been imported to the ganownow database container and now interacts with gasnownow_web container using the gasnownow-network. This implies that in
+   gasnownow_web container can make changes in gasnownow.sql file but this time using the wp-cli. We want to do a search and replace of the urls present in gasnownow.sql
+   so that SQL file can contain the new url and website can run when inserted in a browser. Search and replace on gasnownow.sql file can be done using the command below:
+   $ wp search-replace old_url dev_url --allow-root
+  NOTE: If you are using the 12.(ii) method above, take note that the varaiable old_url will output url in old_url.txt and the variable dev_url will output url present in dev_url.txt. Therefore we can run the command below to also carryout Search and replace.
+   $ sudo docker exec -i gasnownow_web sh -c 'wp search-replace $old_url $dev_url --allow-root'
+
+EXPORT DATABASE
+15. Export a new database gasnownow_web container that excludes tables that contain User's data. This can be carried out using the command:
+   $ wp db export gasnownow_export.sql --exclude_tables=wp_users,wp_options,wp_commentsmeta,wp_comment --allow-root
+   NOTE: The name of the exported gasnownow file should be "gasnownow_export.sql" and to view it run "ls" command in the docker container.
+
+MODIFY WP-CONFIG.PHP
+16. Assign WP_HOME and WP_SITEURL to your url so as to allow browser display the site.
+   
+OPEN GASNOWNOW WEBSITE ON BROWSER
+17. This will be done using the link below as url:
+   http://IP_ADDRESS:8080
+
+18. WORDPRESS CREDENTIALS
+  a. The URL above will redirect to a wordpress login page. Fill the username anbd password using the following below and login:
+  i. Username: 
+  ii. Password:
+  
+  b. A page containing the following fields will be displayed. Fill each according to the values below:
+  Database Name = Name of Schema / Database created
+  Username: username of database
+  Password: password of database
+   Database Host: Name of Database container
+  Then submit and login.
+  NOTE: Name of database, username of database, password of database and name of database container can be found in 7. and 8.
+
+19. DEPLOYMENT OF GASNOWNOW WEBSITE
+  i. Go into your gasnownow_web container using:
+   $ sudo docker exec gasnownow_web /bin/bash
+  ii. Install git and rsync using:
+   $ apt install git && apt-get install rsync -y
+  iii. In order to make changes to the files in the gitlab repository,  first clone the develop branch from gitlab using: 
+   $ git clone https://gitlab.bincom.net:801/gasnownowv2/webapp.git develop
+  iv. Switch into the develop branch using:
+   $ git checkout remotes/origin/develop 
+  v. Copy wp-content, gasnownow_export.sql and wp-config.php as these are majorly the files that you will be making changes to. To do thid use:
+   $ rsync -r -v --delete  wp-content/* develop/wp-content/
+   $ cp gasnownow_export.sql develop && cp wp-config.php develop
+  vi. Do git commands to stage and also commit the changes using:
+   $ git add . && git commit -m "sync"
+  vii. Create a new branch for yourself using:
+   $ git branch <new_branch>
+  vii. Push commited files to the new branch in gitlab
+   $ git push -o ci.skip origin HEAD:refs/heads/<new_branch>
+   ix. Then create a merge request in gitlab.
